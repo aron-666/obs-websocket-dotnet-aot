@@ -1,6 +1,6 @@
-﻿using System;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+using System;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace OBSWebsocketDotNet.Types
 {
@@ -13,13 +13,13 @@ namespace OBSWebsocketDotNet.Types
         /// <summary>
         /// Is output currently active (streaming/recording)
         /// </summary>
-        [JsonProperty(PropertyName = "outputActive")]
+        [JsonPropertyName("outputActive")]
         public bool IsActive { set; get; }
 
         /// <summary>
         /// Output state as string
         /// </summary>
-        [JsonProperty(PropertyName = "outputState")]
+        [JsonPropertyName("outputState")]
         public string StateStr { set; get; }
 
         /// <summary>
@@ -47,7 +47,7 @@ namespace OBSWebsocketDotNet.Types
         /// Constructor
         /// </summary>
         /// <param name="body"></param>
-        public OutputStateChanged(JObject body)
+        public OutputStateChanged(JsonElement body)
         {
             JsonConvert.PopulateObject(body.ToString(), this);
         }
@@ -58,3 +58,4 @@ namespace OBSWebsocketDotNet.Types
         public OutputStateChanged() { }
     }
 }
+

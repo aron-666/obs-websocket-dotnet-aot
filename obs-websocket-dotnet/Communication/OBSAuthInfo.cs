@@ -1,5 +1,5 @@
-﻿using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+﻿using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace OBSWebsocketDotNet.Communication
 {
@@ -11,22 +11,26 @@ namespace OBSWebsocketDotNet.Communication
         /// <summary>
         /// Authentication challenge
         /// </summary>
-        [JsonProperty(PropertyName = "challenge")]
-        public readonly string Challenge;
+        [JsonPropertyName("challenge")]
+        public string Challenge { get; set; }
 
         /// <summary>
         /// Password salt
         /// </summary>
-        [JsonProperty(PropertyName = "salt")]
-        public readonly string PasswordSalt;
+        [JsonPropertyName("salt")]
+        public string PasswordSalt { get; set; }
 
         /// <summary>
         /// Builds the object from JSON response body
         /// </summary>
-        /// <param name="data">JSON response body as a <see cref="JObject"/></param>
-        public OBSAuthInfo(JObject data)
+        /// <param name="data">JSON response body as a <see cref="JsonElement"/></param>
+        public OBSAuthInfo(JsonElement data)
         {
-            JsonConvert.PopulateObject(data.ToString(), this);
+            if (data.TryGetProperty("authentication", out var authElement))
+            {
+                Challenge = JsonHelper.GetPropertyValue<string>(authElement, "challenge");
+                PasswordSalt = JsonHelper.GetPropertyValue<string>(authElement, "salt");
+            }
         }
 
         /// <summary>

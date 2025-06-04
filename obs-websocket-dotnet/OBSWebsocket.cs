@@ -1,13 +1,13 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 using OBSWebsocketDotNet.Communication;
 using Websocket.Client;
 
@@ -22,8 +22,8 @@ namespace OBSWebsocketDotNet
         private string connectionPassword = null;
         private WebsocketClient wsConnection;
 
-        private delegate void RequestCallback(OBSWebsocket sender, JObject body);
-        private readonly ConcurrentDictionary<string, TaskCompletionSource<JObject>> responseHandlers;
+        private delegate void RequestCallback(OBSWebsocket sender, JsonElement body);
+        private readonly ConcurrentDictionary<string, TaskCompletionSource<JsonElement>> responseHandlers;
 
         // Random should never be created inside a function
         private static readonly Random random = new Random();
@@ -71,7 +71,7 @@ namespace OBSWebsocketDotNet
         /// </summary>
         public OBSWebsocket()
         {
-            responseHandlers = new ConcurrentDictionary<string, TaskCompletionSource<JObject>>();
+            responseHandlers = new ConcurrentDictionary<string, TaskCompletionSource<JsonElement>>();
         }
 
         /// <summary>
@@ -101,18 +101,19 @@ namespace OBSWebsocketDotNet
 
             if (wsConnection != null && wsConnection.IsRunning)
             {
-                Disconnect();
+                return;
             }
 
-            wsConnection = new WebsocketClient(new Uri(url));
-            wsConnection.IsReconnectionEnabled = false;
-            wsConnection.ReconnectTimeout = null;
-            wsConnection.ErrorReconnectTimeout = null;
-            wsConnection.MessageReceived.Subscribe(m => Task.Run(() => WebsocketMessageHandler(this, m)));
-            wsConnection.DisconnectionHappened.Subscribe(d => Task.Run(() => OnWebsocketDisconnect(this, d)));
-
             connectionPassword = password;
-            wsConnection.StartOrFail();
+
+            wsConnection = new WebsocketClient(new Uri(url))
+            {
+                ReconnectTimeout = wsTimeout
+            };            wsConnection.ReconnectionHappened.Subscribe(info => OnWebsocketConnect(info));
+            wsConnection.MessageReceived.Subscribe(msg => WebsocketMessageHandler(msg));
+            wsConnection.DisconnectionHappened.Subscribe(info => OnWebsocketDisconnect(info));
+
+            wsConnection.Start();
         }
 
         /// <summary>
@@ -120,52 +121,36 @@ namespace OBSWebsocketDotNet
         /// </summary>
         public void Disconnect()
         {
-            connectionPassword = null;
-            if (wsConnection != null)
-            {
-                // Attempt to both close and dispose the existing connection
-                try
-                {
-                    wsConnection.Stop(WebSocketCloseStatus.NormalClosure, "User requested disconnect");
-                    ((IDisposable)wsConnection).Dispose();
-                }
-                catch { }
-                wsConnection = null;
-            }
-
-            var unusedHandlers = responseHandlers.ToArray();
-            responseHandlers.Clear();
-            foreach (var cb in unusedHandlers)
-            {
-                var tcs = cb.Value;
-                tcs.TrySetCanceled();
-            }
+            wsConnection?.Stop(WebSocketCloseStatus.NormalClosure, "User disconnected");
         }
 
-        // This callback handles a websocket disconnection
-        private void OnWebsocketDisconnect(object sender, DisconnectionInfo d)
+        // This callback handles a websocket connection established
+        private void OnWebsocketConnect(ReconnectionInfo reconnectionInfo)
         {
-            if (d == null || d.CloseStatus == null)
-            {
-                Disconnected?.Invoke(sender, new ObsDisconnectionInfo(ObsCloseCodes.UnknownReason, null, d));
-            }
-            else
-            {
-                Disconnected?.Invoke(sender, new ObsDisconnectionInfo((ObsCloseCodes)d.CloseStatus, d.CloseStatusDescription, d));
-            }
-        }
+            Logger?.LogInformation("OBS Websocket connection established");
+        }        // This callback handles a websocket disconnection
+        private void OnWebsocketDisconnect(DisconnectionInfo d)
+        {
+            Logger?.LogInformation($"OBS Websocket disconnection, info: {d.Type} - {d.CloseStatus} - {d.CloseStatusDescription}");
 
-        // This callback handles incoming JSON messages and determines if it's
+            ObsCloseCodes obsCloseCode = ObsCloseCodes.UnknownReason;
+            if (d.CloseStatus.HasValue)
+            {
+                obsCloseCode = (ObsCloseCodes)d.CloseStatus.Value;
+            }
+
+            Disconnected?.Invoke(this, new ObsDisconnectionInfo(obsCloseCode, d.CloseStatusDescription ?? "Unknown reason", d));
+        }        // This callback handles incoming JSON messages and determines if it's
         // a request response or an event ("Update" in obs-websocket terminology)
-        private void WebsocketMessageHandler(object sender, ResponseMessage e)
+        private void WebsocketMessageHandler(ResponseMessage e)
         {
             if (e.MessageType != WebSocketMessageType.Text)
             {
                 return;
             }
 
-            ServerMessage msg = JsonConvert.DeserializeObject<ServerMessage>(e.Text);
-            JObject body = msg.Data;
+            ServerMessage msg = JsonSerializer.Deserialize<ServerMessage>(e.Text);
+            JsonElement body = msg.Data;
 
             switch (msg.OperationCode)
             {
@@ -179,14 +164,14 @@ namespace OBSWebsocketDotNet
                 case MessageTypes.RequestResponse:
                 case MessageTypes.RequestBatchResponse:
                     // Handle response to previous request
-                    if (body.ContainsKey("requestId"))
+                    if (body.TryGetProperty("requestId", out var requestIdElement))
                     {
                         // Handle a request :
                         // Find the response handler based on
                         // its associated message ID
-                        string msgID = (string)body["requestId"];
+                        string msgID = requestIdElement.GetString();
 
-                        if (responseHandlers.TryRemove(msgID, out TaskCompletionSource<JObject> handler))
+                        if (responseHandlers.TryRemove(msgID, out TaskCompletionSource<JsonElement> handler))
                         {
                             // Set the response body as Result and notify the request sender
                             handler.SetResult(body);
@@ -195,7 +180,7 @@ namespace OBSWebsocketDotNet
                     break;
                 case MessageTypes.Event:
                     // Handle events
-                    string eventType = body["eventType"].ToString();
+                    string eventType = body.GetProperty("eventType").GetString();
                     Task.Run(() => { ProcessEventType(eventType, body); });
                     break;
                 default:
@@ -203,7 +188,6 @@ namespace OBSWebsocketDotNet
                     Logger?.LogWarning($"Unsupported message type: {msg.OperationCode}");
                     UnsupportedEvent?.Invoke(this, new Types.Events.UnsupportedEventArgs(msg.OperationCode.ToString(), body));
                     break;
-
             }
         }
 
@@ -212,8 +196,8 @@ namespace OBSWebsocketDotNet
         /// </summary>
         /// <param name="requestType">obs-websocket request type, must be one specified in the protocol specification</param>
         /// <param name="additionalFields">additional JSON fields if required by the request type</param>
-        /// <returns>The server's JSON response as a JObject</returns>
-        public JObject SendRequest(string requestType, JObject additionalFields = null)
+        /// <returns>The server's JSON response as a JsonElement</returns>
+        public JsonElement SendRequest(string requestType, JsonElement? additionalFields = null)
         {
             return SendRequest(MessageTypes.Request, requestType, additionalFields, true);
         }
@@ -226,142 +210,142 @@ namespace OBSWebsocketDotNet
         /// <param name="requestType">obs-websocket request type, must be one specified in the protocol specification</param>
         /// <param name="additionalFields">additional JSON fields if required by the request type</param>
         /// <param name="waitForReply">Should wait for reply vs "fire and forget"</param>
-        /// <returns>The server's JSON response as a JObject</returns>
-        internal JObject SendRequest(MessageTypes operationCode, string requestType, JObject additionalFields = null, bool waitForReply = true)
+        /// <returns>The server's JSON response as a JsonElement</returns>
+        internal JsonElement SendRequest(MessageTypes operationCode, string requestType, JsonElement? additionalFields = null, bool waitForReply = true)
         {
-            if (wsConnection == null)
-            {
-                throw new NullReferenceException("Websocket is not initialized");
-            }
+            if (!IsConnected)
+                throw new ObsWebsocketNotConnectedException();
 
+            JsonElement message;
+            string messageId;
+            
             // Prepare the asynchronous response handler
-            var tcs = new TaskCompletionSource<JObject>();
-            JObject message = null;
-            do
+            var tcs = new TaskCompletionSource<JsonElement>();
+            try
             {
                 // Generate a random message id
-                message = MessageFactory.BuildMessage(operationCode, requestType, additionalFields, out string messageId);
-                if (!waitForReply || responseHandlers.TryAdd(messageId, tcs))
+                message = MessageFactory.BuildMessage(operationCode, requestType, additionalFields, out messageId);
+                if (waitForReply)
                 {
-                    break;
+                    // Register the request callback
+                    responseHandlers[messageId] = tcs;
                 }
-                // Message id already exists, retry with a new one.
-            } while (true);
-            // Send the message 
-            wsConnection.Send(message.ToString());
-            if (!waitForReply)
+
+                // Send the message and wait for a response
+                // (received and notified by the websocket response handler)
+                wsConnection.Send(message.GetRawText());
+
+                if (waitForReply)
+                {
+                    var result = tcs.Task.Result;
+
+                    if (!JsonHelper.GetPropertyValue<bool>(result.GetProperty("requestStatus"), "result", false))
+                    {
+                        string message1 = JsonHelper.GetPropertyValue<string>(result.GetProperty("requestStatus"), "comment", "Unknown Error");
+                        throw new ObsWebsocketException(message1);
+                    }
+
+                    if (result.TryGetProperty("responseData", out var responseData)) // ResponseData is optional
+                        return responseData;
+
+                    return new JsonElement();
+                }
+            }
+            catch (AggregateException e)
             {
-                return null;
+                throw e.InnerException;
             }
 
-            // Wait for a response (received and notified by the websocket response handler)
-            tcs.Task.Wait(wsTimeout.Milliseconds);
-
-            if (tcs.Task.IsCanceled)
-                throw new ErrorResponseException("Request canceled", 0);
-
-            // Throw an exception if the server returned an error.
-            // An error occurs if authentication fails or one if the request body is invalid.
-            var result = tcs.Task.Result;
-
-            if (!(bool)result["requestStatus"]["result"])
-            {
-                var status = (JObject)result["requestStatus"];
-                throw new ErrorResponseException($"ErrorCode: {status["code"]}{(status.ContainsKey("comment") ? $", Comment: {status["comment"]}" : "")}", (int)status["code"]);
-            }
-
-            if (result.ContainsKey("responseData")) // ResponseData is optional
-                return result["responseData"].ToObject<JObject>();
-
-            return new JObject();
+            return new JsonElement();
         }
 
         /// <summary>
         /// Request authentication data. You don't have to call this manually.
         /// </summary>
-        /// <returns>Authentication data in an <see cref="OBSAuthInfo"/> object</returns>
+        /// <returns>AuthInfo object</returns>
         public OBSAuthInfo GetAuthInfo()
         {
-            JObject response = SendRequest("GetAuthRequired");
-            return new OBSAuthInfo(response);
+            var msg = SendRequest("GetAuthRequired");
+            return new OBSAuthInfo(msg);
         }
 
         /// <summary>
-        /// Authenticates to the Websocket server using the challenge and salt given in the passed <see cref="OBSAuthInfo"/> object
+        /// Authenticates to the server using the challenge and salt given in the passed <see cref="OBSAuthInfo"/> object
         /// </summary>
         /// <param name="password">User password</param>
         /// <param name="authInfo">Authentication data</param>
-        /// <returns>true if authentication succeeds, false otherwise</returns>
         protected void SendIdentify(string password, OBSAuthInfo authInfo = null)
         {
-            var requestFields = new JObject
+            var responseBuilder = new Dictionary<string, object>
             {
                 { "rpcVersion", SUPPORTED_RPC_VERSION }
             };
 
-            if (authInfo != null)
+            if (!string.IsNullOrEmpty(password) && authInfo != null)
             {
-                // Authorization required
-
                 string secret = HashEncode(password + authInfo.PasswordSalt);
                 string authResponse = HashEncode(secret + authInfo.Challenge);
-                requestFields.Add("authentication", authResponse);
+
+                responseBuilder["authentication"] = authResponse;
             }
 
-            SendRequest(MessageTypes.Identify, null, requestFields, false);
+            var response = JsonHelper.ToJsonElement(responseBuilder);
+            var identify = MessageFactory.BuildMessage(MessageTypes.Identify, string.Empty, response, out _);
+            wsConnection.Send(identify.GetRawText());
         }
 
         /// <summary>
-        /// Encode a Base64-encoded SHA-256 hash
+        /// Update session parameters. Called by the websocket client after a successful connection to obs-websocket.
+        /// </summary>
+        /// <param name="body">JSON body of the response</param>
+        protected void HandleHello(JsonElement body)
+        {
+            var authInfo = new OBSAuthInfo(body);
+
+            if (JsonHelper.GetPropertyValue<bool>(body, "authRequired", false))
+            {
+                // Authentication required
+                SendIdentify(connectionPassword, authInfo);
+            }
+            else
+            {
+                // No authentication required
+                SendIdentify(connectionPassword);
+            }
+        }
+
+        /// <summary>
+        /// Encode a Base64-encoded SHA256 hash
         /// </summary>
         /// <param name="input">source string</param>
         /// <returns></returns>
-        protected string HashEncode(string input)
+        protected static string HashEncode(string input)
         {
-            using var sha256 = new SHA256Managed();
+            var sha256 = SHA256.Create();
 
-            byte[] textBytes = Encoding.ASCII.GetBytes(input);
-            byte[] hash = sha256.ComputeHash(textBytes);
+            byte[] textBytes = Encoding.UTF8.GetBytes(input);
+            byte[] hashBytes = sha256.ComputeHash(textBytes);
 
-            return System.Convert.ToBase64String(hash);
+            string hash = Convert.ToBase64String(hashBytes);
+            return hash;
         }
 
         /// <summary>
-        /// Generate a message ID
+        /// Generate a 32-character random string, used as a private session token
         /// </summary>
-        /// <param name="length">(optional) message ID length</param>
-        /// <returns>A random string of alphanumerical characters</returns>
-        protected string NewMessageID(int length = 16)
+        /// <returns>A random 32-character hexadecimal string</returns>
+        protected static string NewSessionToken()
         {
-            const string pool = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+            const string pool = "abcdef0123456789";
+            var sb = new StringBuilder();
 
-            string result = "";
-            for (int i = 0; i < length; i++)
+            for (int i = 0; i < 32; i++)
             {
-                int index = random.Next(0, pool.Length - 1);
-                result += pool[index];
+                char c = pool[random.Next(0, pool.Length)];
+                sb.Append(c);
             }
 
-            return result;
-        }
-
-        private void HandleHello(JObject payload)
-        {
-            if (!wsConnection.IsStarted)
-            {
-                return;
-            }
-
-            OBSAuthInfo authInfo = null;
-            if (payload.ContainsKey("authentication"))
-            {
-                // Authentication required
-                authInfo = new OBSAuthInfo((JObject)payload["authentication"]);
-            }
-
-            SendIdentify(connectionPassword, authInfo);
-
-            connectionPassword = null;
+            return sb.ToString();
         }
     }
 }

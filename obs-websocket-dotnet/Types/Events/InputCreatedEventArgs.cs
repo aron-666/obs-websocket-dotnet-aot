@@ -1,5 +1,5 @@
-﻿using System;
-using Newtonsoft.Json.Linq;
+using System;
+using System.Text.Json;
 using OBSWebsocketDotNet;
 
 namespace OBSWebsocketDotNet.Types.Events
@@ -27,12 +27,12 @@ namespace OBSWebsocketDotNet.Types.Events
         /// <summary>
         /// The settings configured to the input when it was created
         /// </summary>
-        public JObject InputSettings { get; } 
+        public JsonElement InputSettings { get; } 
         
         /// <summary>
         /// The default settings for the input
         /// </summary>
-        public JObject DefaultInputSettings { get; }
+        public JsonElement DefaultInputSettings { get; }
 
         /// <summary>
         /// Default Constructor
@@ -40,9 +40,9 @@ namespace OBSWebsocketDotNet.Types.Events
         /// <param name="inputName">The input name</param>
         /// <param name="inputKind">The kind of input</param>
         /// <param name="unversionedInputKind">The unversioned kind of input</param>
-        /// <param name="inputSettings">The input settings as a JObject</param>
-        /// <param name="defaultInputSettings">The default input settings as a JObject</param>
-        public InputCreatedEventArgs(string inputName, string inputKind, string unversionedInputKind, JObject inputSettings, JObject defaultInputSettings)
+        /// <param name="inputSettings">The input settings as a JsonElement</param>
+        /// <param name="defaultInputSettings">The default input settings as a JsonElement</param>
+        public InputCreatedEventArgs(string inputName, string inputKind, string unversionedInputKind, JsonElement inputSettings, JsonElement defaultInputSettings)
         {
             InputName = inputName;
             InputKind = inputKind;

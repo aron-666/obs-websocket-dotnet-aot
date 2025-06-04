@@ -1,4 +1,4 @@
-﻿namespace OBSWebsocketDotNet.Types
+namespace OBSWebsocketDotNet.Types
 {
     /// <summary>
     /// Type of scene item's source

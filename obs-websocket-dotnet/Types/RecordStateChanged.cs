@@ -1,5 +1,5 @@
-﻿using Newtonsoft.Json.Linq;
-using Newtonsoft.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -14,14 +14,14 @@ namespace OBSWebsocketDotNet.Types
         /// <summary>
         /// File name for the saved recording, if record stopped. null otherwise
         /// </summary>
-        [JsonProperty(PropertyName = "outputPath")]
+        [JsonPropertyName("outputPath")]
         public string OutputPath { set; get; }
 
         /// <summary>
         /// Constructor
         /// </summary>
         /// <param name="body"></param>
-        public RecordStateChanged(JObject body) :base(body)
+        public RecordStateChanged(JsonElement body) :base(body)
         {
             JsonConvert.PopulateObject(body.ToString(), this);
         }
@@ -32,3 +32,4 @@ namespace OBSWebsocketDotNet.Types
         public RecordStateChanged() { }
     }
 }
+

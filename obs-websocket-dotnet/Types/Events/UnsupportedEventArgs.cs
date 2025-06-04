@@ -1,5 +1,5 @@
-﻿using System;
-using Newtonsoft.Json.Linq;
+using System;
+using System.Text.Json;
 
 namespace OBSWebsocketDotNet.Types.Events
 {
@@ -15,12 +15,12 @@ namespace OBSWebsocketDotNet.Types.Events
         /// <summary>
         /// The body of the event
         /// </summary>
-        public JObject Body { get; }
+        public JsonElement Body { get; }
 
         /// <summary>
         /// Event args for unsupported events
         /// </summary>
-        public UnsupportedEventArgs(string eventType, JObject body)
+        public UnsupportedEventArgs(string eventType, JsonElement body)
         {
             EventType = eventType;
             Body = body;

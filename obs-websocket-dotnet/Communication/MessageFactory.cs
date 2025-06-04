@@ -1,42 +1,49 @@
-﻿using Newtonsoft.Json.Linq;
-using System;
+﻿using System;
 using System.Collections.Generic;
-using System.Text;
+using System.Text.Json;
 
 namespace OBSWebsocketDotNet.Communication
 {
     internal static class MessageFactory
     {
-        internal static JObject BuildMessage(MessageTypes opCode, string messageType, JObject additionalFields, out string messageId)
+        internal static JsonElement BuildMessage(MessageTypes opCode, string messageType, JsonElement? additionalFields, out string messageId)
         {
             messageId = Guid.NewGuid().ToString();
-            JObject payload = new JObject()
+            
+            var payload = new Dictionary<string, object>
             {
                 { "op", (int)opCode }
             };
 
-            JObject data = new JObject();
+            var data = new Dictionary<string, object>();
             
             switch (opCode)
             {
                 case MessageTypes.Request:
                     data.Add("requestType", messageType);
                     data.Add("requestId", messageId);
-                    data.Add("requestData", additionalFields);
-                    additionalFields = null;
+                    if (additionalFields.HasValue)
+                    {
+                        data.Add("requestData", JsonHelper.ToDictionary(additionalFields.Value));
+                    }
                     break;
                 case MessageTypes.RequestBatch:
                     data.Add("requestId", messageId);
                     break;
-
+                case MessageTypes.Identify:
+                    if (additionalFields.HasValue)
+                    {
+                        var additionalDict = JsonHelper.ToDictionary(additionalFields.Value);
+                        foreach (var kvp in additionalDict)
+                        {
+                            data[kvp.Key] = kvp.Value;
+                        }
+                    }
+                    break;
             }
 
-            if (additionalFields != null)
-            {
-                data.Merge(additionalFields);
-            }
             payload.Add("d", data);
-            return payload;            
+            return JsonHelper.ToJsonElement(payload);
         }
     }
 }

@@ -1,5 +1,5 @@
-﻿using System;
-using Newtonsoft.Json.Linq;
+using System;
+using System.Text.Json;
 using OBSWebsocketDotNet;
 
 namespace OBSWebsocketDotNet.Types.Events
@@ -32,12 +32,12 @@ namespace OBSWebsocketDotNet.Types.Events
         /// <summary>
         /// The settings configured to the filter when it was created
         /// </summary>
-        public JObject FilterSettings{ get; }
+        public JsonElement FilterSettings{ get; }
         
         /// <summary>
         /// The default settings for the filter
         /// </summary>
-        public JObject DefaultFilterSettings { get; }
+        public JsonElement DefaultFilterSettings { get; }
 
         /// <summary>
         /// Default Constructor
@@ -46,9 +46,9 @@ namespace OBSWebsocketDotNet.Types.Events
         /// <param name="filterName">The filter name</param>
         /// <param name="filterKind">The kind of filter</param>
         /// <param name="filterIndex">The index of the filter</param>
-        /// <param name="filterSettings">The filters settings as a JObject</param>
-        /// <param name="defaultFilterSettings">The default filter settings as a JObject</param>
-        public SourceFilterCreatedEventArgs(string sourceName, string filterName, string filterKind, int filterIndex, JObject filterSettings, JObject defaultFilterSettings)
+        /// <param name="filterSettings">The filters settings as a JsonElement</param>
+        /// <param name="defaultFilterSettings">The default filter settings as a JsonElement</param>
+        public SourceFilterCreatedEventArgs(string sourceName, string filterName, string filterKind, int filterIndex, JsonElement filterSettings, JsonElement defaultFilterSettings)
         {
             SourceName = sourceName;
             FilterName = filterName;
@@ -59,3 +59,4 @@ namespace OBSWebsocketDotNet.Types.Events
         }
     }
 }
+

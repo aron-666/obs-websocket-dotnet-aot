@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using Newtonsoft.Json.Linq;
+using System.Text.Json;
 
 namespace OBSWebsocketDotNet.Types.Events
 {
@@ -12,13 +12,13 @@ namespace OBSWebsocketDotNet.Types.Events
         /// <summary>
         /// Updated array of scenes
         /// </summary>
-        public List<JObject> Scenes { get; }
+        public List<JsonElement> Scenes { get; }
 
         /// <summary>
         /// Default Constructor
         /// </summary>
         /// <param name="scenes">Collection of scene data as JObjects</param>
-        public SceneListChangedEventArgs(List<JObject> scenes)
+        public SceneListChangedEventArgs(List<JsonElement> scenes)
         {
             Scenes = scenes;
         }
